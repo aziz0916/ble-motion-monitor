@@ -1,0 +1,13 @@
+# ESP-IDF 編譯產物
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+
+# 本機密碼與環境設定
+.env
+.env.*
+!.env.example
+
+# 其他產物
+node_modules/

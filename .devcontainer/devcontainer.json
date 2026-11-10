@@ -1,0 +1,11 @@
+{
+  "name": "BLE Motion Monitor ESP-IDF",
+  "image": "espressif/idf:v5.4.2",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "espressif.esp-idf-extension"
+      ]
+    }
+  }
+}

@@ -10,7 +10,7 @@ void app_main(void)
         const char *motion = (count % 2 == 0) ? "active" : "motionless";
         const char *button = (count % 4 == 3) ? "pressed" : "released";
 
-        printf("motion=%s, button=%s\n", motion, button);
+        printf("event_id=%u, motion=%s, button=%s\n", count + 1, motion, button);
 
         count++;
         vTaskDelay(pdMS_TO_TICKS(3000));

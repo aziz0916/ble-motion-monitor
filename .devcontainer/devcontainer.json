@@ -1,6 +1,9 @@
 {
   "name": "BLE Motion Monitor ESP-IDF",
   "image": "espressif/idf:v5.4.2",
+  "runArgs": [
+    "--device=/dev/ttyUSB0:/dev/ttyUSB0"
+  ],
   "customizations": {
     "vscode": {
       "extensions": [

@@ -5,6 +5,32 @@
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "nvs_flash.h"
+#include "esp_gap_ble_api.h"
+#include "esp_bt_device.h"
+
+static esp_ble_adv_params_t adv_params = {
+    .adv_int_min = 0x00A0,
+    .adv_int_max = 0x00F0,
+    .adv_type = ADV_TYPE_NONCONN_IND,
+    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
+    .channel_map = ADV_CHNL_ALL,
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+};
+
+static esp_ble_adv_data_t adv_data = {
+    .set_scan_rsp = false,
+    .include_name = true,
+    .flag = ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT,
+};
+
+static void gap_callback(esp_gap_ble_cb_event_t event,
+                         esp_ble_gap_cb_param_t *param)
+{
+    if (event == ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT &&
+        param->adv_data_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+        esp_ble_gap_start_advertising(&adv_params);
+    }
+}
 
 void app_main(void)
 {
@@ -23,6 +49,10 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_bluedroid_enable());
 
     printf("BLE initialized\n");
+
+    ESP_ERROR_CHECK(esp_ble_gap_register_callback(gap_callback));
+    ESP_ERROR_CHECK(esp_ble_gap_set_device_name("BLE_Motion"));
+    ESP_ERROR_CHECK(esp_ble_gap_config_adv_data(&adv_data));
 
     unsigned int count = 0;
 

@@ -17,10 +17,21 @@ static esp_ble_adv_params_t adv_params = {
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
 
+static uint8_t sensor_data[] = {
+    0xFF, 0xFF,       // 測試用識別欄位
+    0x01,             // 格式版本
+    0x01,             // 模擬感測器編號
+    0x01, 0x00,       // 測試用事件編號：1
+    0x01,             // 模擬活動：1
+    0x00              // 模擬按鈕：0
+};
+
 static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
     .flag = ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT,
+    .manufacturer_len = sizeof(sensor_data),
+    .p_manufacturer_data = sensor_data,
 };
 
 static void gap_callback(esp_gap_ble_cb_event_t event,

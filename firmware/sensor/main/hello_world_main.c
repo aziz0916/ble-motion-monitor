@@ -71,7 +71,15 @@ void app_main(void)
         const char *motion = (count % 2 == 0) ? "active" : "motionless";
         const char *button = (count % 4 == 3) ? "pressed" : "released";
 
-        printf("event_id=%u, motion=%s, button=%s\n", count + 1, motion, button);
+        unsigned int event_id = (count + 1) & 0xFFFF;
+        sensor_data[4] = event_id & 0xFF;
+        sensor_data[5] = (event_id >> 8) & 0xFF;
+        sensor_data[6] = (count % 2 == 0) ? 1 : 0;
+        sensor_data[7] = (count % 4 == 3) ? 1 : 0;
+
+        printf("event_id=%u, motion=%s, button=%s, packet=%02X %02X %02X %02X\n",
+               event_id, motion, button,
+               sensor_data[4], sensor_data[5], sensor_data[6], sensor_data[7]);
 
         count++;
         vTaskDelay(pdMS_TO_TICKS(3000));

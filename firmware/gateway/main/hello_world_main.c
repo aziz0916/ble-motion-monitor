@@ -1,52 +1,71 @@
-/*
- * SPDX-FileCopyrightText: 2010-2022 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: CC0-1.0
- */
-
 #include <stdio.h>
-#include <inttypes.h>
-#include "sdkconfig.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_chip_info.h"
-#include "esp_flash.h"
-#include "esp_system.h"
+#include <string.h>
+
+#include "esp_err.h"
+#include "esp_bt.h"
+#include "esp_bt_main.h"
+#include "esp_gap_ble_api.h"
+#include "nvs_flash.h"
+
+static esp_ble_scan_params_t scan_params = {
+    .scan_type = BLE_SCAN_TYPE_PASSIVE,
+    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
+    .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
+    .scan_interval = 0x50,
+    .scan_window = 0x30,
+    .scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE,
+};
+
+static void gap_callback(esp_gap_ble_cb_event_t event,
+                         esp_ble_gap_cb_param_t *param)
+{
+    if (event == ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT) {
+        if (param->scan_param_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+            ESP_ERROR_CHECK(esp_ble_gap_start_scanning(0));
+        } else {
+            printf("BLE scan parameters failed\n");
+        }
+    }
+
+    if (event == ESP_GAP_BLE_SCAN_START_COMPLETE_EVT) {
+        if (param->scan_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+            printf("BLE scan started\n");
+        } else {
+            printf("BLE scan start failed\n");
+        }
+    }
+
+    if (event == ESP_GAP_BLE_SCAN_RESULT_EVT &&
+        param->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
+        uint8_t name_length = 0;
+        uint8_t *name = esp_ble_resolve_adv_data(
+            param->scan_rst.ble_adv,
+            ESP_BLE_AD_TYPE_NAME_CMPL,
+            &name_length
+        );
+
+        const char *target = "BLE_Motion";
+        if (name != NULL &&
+            name_length == strlen(target) &&
+            memcmp(name, target, name_length) == 0) {
+            printf("Found BLE_Motion, RSSI=%d dBm\n",
+                   param->scan_rst.rssi);
+        }
+    }
+}
 
 void app_main(void)
 {
-    printf("Hello world!\n");
+    ESP_ERROR_CHECK(nvs_flash_init());
 
-    /* Print chip information */
-    esp_chip_info_t chip_info;
-    uint32_t flash_size;
-    esp_chip_info(&chip_info);
-    printf("This is %s chip with %d CPU core(s), %s%s%s%s, ",
-           CONFIG_IDF_TARGET,
-           chip_info.cores,
-           (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "WiFi/" : "",
-           (chip_info.features & CHIP_FEATURE_BT) ? "BT" : "",
-           (chip_info.features & CHIP_FEATURE_BLE) ? "BLE" : "",
-           (chip_info.features & CHIP_FEATURE_IEEE802154) ? ", 802.15.4 (Zigbee/Thread)" : "");
+    esp_bt_controller_config_t bt_config =
+        BT_CONTROLLER_INIT_CONFIG_DEFAULT();
 
-    unsigned major_rev = chip_info.revision / 100;
-    unsigned minor_rev = chip_info.revision % 100;
-    printf("silicon revision v%d.%d, ", major_rev, minor_rev);
-    if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
-        printf("Get flash size failed");
-        return;
-    }
+    ESP_ERROR_CHECK(esp_bt_controller_init(&bt_config));
+    ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
+    ESP_ERROR_CHECK(esp_bluedroid_init());
+    ESP_ERROR_CHECK(esp_bluedroid_enable());
 
-    printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
-           (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
-
-    printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
-
-    for (int i = 10; i >= 0; i--) {
-        printf("Restarting in %d seconds...\n", i);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-    printf("Restarting now.\n");
-    fflush(stdout);
-    esp_restart();
+    ESP_ERROR_CHECK(esp_ble_gap_register_callback(gap_callback));
+    ESP_ERROR_CHECK(esp_ble_gap_set_scan_params(&scan_params));
 }

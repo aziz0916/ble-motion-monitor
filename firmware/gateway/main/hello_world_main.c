@@ -50,6 +50,20 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
             memcmp(name, target, name_length) == 0) {
             printf("Found BLE_Motion, RSSI=%d dBm\n",
                    param->scan_rst.rssi);
+            uint8_t data_length = 0;
+            uint8_t *data = esp_ble_resolve_adv_data(
+                param->scan_rst.ble_adv,
+                ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE,
+                &data_length
+            );
+
+            if (data != NULL) {
+                printf("Manufacturer data:");
+                for (uint8_t i = 0; i < data_length; i++) {
+                    printf(" %02X", data[i]);
+                }
+                printf("\n");
+            }
         }
     }
 }

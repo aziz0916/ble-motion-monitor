@@ -63,6 +63,11 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
                     printf(" %02X", data[i]);
                 }
                 printf("\n");
+                if (data_length == 8 && data[0] == 0xFF && data[1] == 0xFF) {
+                    unsigned int event_id = data[4] | (data[5] << 8);
+                    printf("version=%u, sensor=%u, event=%u, motion=%u, button=%u\n",
+                           data[2], data[3], event_id, data[6], data[7]);
+                }
             }
         }
     }

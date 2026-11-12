@@ -74,13 +74,17 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
                     printf("boot_id=%lu\n", (unsigned long)boot_id);
                     static bool seen[256] = {0};
                     static unsigned int last_event[256] = {0};
+                    static uint32_t last_boot[256] = {0};
                     uint8_t sensor_id = data[3];
 
-                    if (seen[sensor_id] && last_event[sensor_id] == event_id) {
+                    if (seen[sensor_id] &&
+                        last_boot[sensor_id] == boot_id &&
+                        last_event[sensor_id] == event_id) {
                         printf("duplicate event\n");
                     } else {
                         seen[sensor_id] = true;
                         last_event[sensor_id] = event_id;
+                        last_boot[sensor_id] = boot_id;
                         printf("new event\n");
                     }
                     printf("version=%u, sensor=%u, event=%u, motion=%u, button=%u\n",

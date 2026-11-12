@@ -63,9 +63,12 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
                     printf(" %02X", data[i]);
                 }
                 printf("\n");
-                if (data_length == 12 && data[0] == 0xFF &&
-                    data[1] == 0xFF && data[2] == 0x02) {
-                    unsigned int event_id = data[4] | (data[5] << 8);
+                if (data_length == 14 && data[0] == 0xFF &&
+                    data[1] == 0xFF && data[2] == 0x03) {
+                    uint32_t event_id = (uint32_t)data[4] |
+                                        ((uint32_t)data[5] << 8) |
+                                        ((uint32_t)data[12] << 16) |
+                                        ((uint32_t)data[13] << 24);
                     uint32_t boot_id = (uint32_t)data[8] |
                                        ((uint32_t)data[9] << 8) |
                                        ((uint32_t)data[10] << 16) |
@@ -87,8 +90,8 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
                         last_boot[sensor_id] = boot_id;
                         printf("new event\n");
                     }
-                    printf("version=%u, sensor=%u, event=%u, motion=%u, button=%u\n",
-                           data[2], data[3], event_id, data[6], data[7]);
+                    printf("version=%u, sensor=%u, event=%lu, motion=%u, button=%u\n",
+                           data[2], data[3], (unsigned long)event_id, data[6], data[7]);
                 }
             }
         }

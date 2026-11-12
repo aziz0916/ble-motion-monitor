@@ -20,11 +20,12 @@ static esp_ble_adv_params_t adv_params = {
 
 static uint8_t sensor_data[] = {
     0xFF, 0xFF,       // 測試用識別欄位
-    0x01,             // 格式版本
+    0x02,             // 格式版本
     0x01,             // 模擬感測器編號
     0x01, 0x00,       // 測試用事件編號：1
     0x01,             // 模擬活動：1
-    0x00              // 模擬按鈕：0
+    0x00,             // 模擬按鈕：0
+    0x00, 0x00, 0x00, 0x00  // 啟動編號，稍後填入
 };
 
 static esp_ble_adv_data_t adv_data = {
@@ -88,6 +89,13 @@ void app_main(void)
     ESP_ERROR_CHECK(err);
     uint32_t boot_id = next_boot_id();
     printf("boot_id=%lu\n", (unsigned long)boot_id);
+    sensor_data[8] = boot_id & 0xFF;
+    sensor_data[9] = (boot_id >> 8) & 0xFF;
+    sensor_data[10] = (boot_id >> 16) & 0xFF;
+    sensor_data[11] = (boot_id >> 24) & 0xFF;
+
+    printf("boot bytes=%02X %02X %02X %02X\n",
+           sensor_data[8], sensor_data[9], sensor_data[10], sensor_data[11]);
 
     esp_bt_controller_config_t bt_config = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_bt_controller_init(&bt_config));

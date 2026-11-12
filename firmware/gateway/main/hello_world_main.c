@@ -63,8 +63,15 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
                     printf(" %02X", data[i]);
                 }
                 printf("\n");
-                if (data_length == 8 && data[0] == 0xFF && data[1] == 0xFF) {
+                if (data_length == 12 && data[0] == 0xFF &&
+                    data[1] == 0xFF && data[2] == 0x02) {
                     unsigned int event_id = data[4] | (data[5] << 8);
+                    uint32_t boot_id = (uint32_t)data[8] |
+                                       ((uint32_t)data[9] << 8) |
+                                       ((uint32_t)data[10] << 16) |
+                                       ((uint32_t)data[11] << 24);
+
+                    printf("boot_id=%lu\n", (unsigned long)boot_id);
                     static bool seen[256] = {0};
                     static unsigned int last_event[256] = {0};
                     uint8_t sensor_id = data[3];

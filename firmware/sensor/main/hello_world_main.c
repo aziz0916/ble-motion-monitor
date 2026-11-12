@@ -41,6 +41,14 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
         param->adv_data_cmpl.status == ESP_BT_STATUS_SUCCESS) {
         esp_ble_gap_start_advertising(&adv_params);
     }
+
+    if (event == ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT) {
+        if (param->adv_stop_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+            ESP_ERROR_CHECK(esp_ble_gap_config_adv_data(&adv_data));
+        } else {
+            printf("BLE advertising stop failed\n");
+        }
+    }
 }
 
 void app_main(void)
@@ -66,6 +74,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_ble_gap_config_adv_data(&adv_data));
 
     unsigned int count = 0;
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
     while (1) {
         const char *motion = (count % 2 == 0) ? "active" : "motionless";
@@ -81,6 +90,7 @@ void app_main(void)
                event_id, motion, button,
                sensor_data[4], sensor_data[5], sensor_data[6], sensor_data[7]);
 
+        ESP_ERROR_CHECK(esp_ble_gap_stop_advertising());
         count++;
         vTaskDelay(pdMS_TO_TICKS(3000));
     }

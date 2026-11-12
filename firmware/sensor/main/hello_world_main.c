@@ -5,6 +5,7 @@
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_gap_ble_api.h"
 #include "esp_bt_device.h"
 
@@ -51,6 +52,31 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
     }
 }
 
+static uint32_t next_boot_id(void)
+{
+    nvs_handle_t handle;
+    uint32_t boot_id = 0;
+
+    ESP_ERROR_CHECK(nvs_open("sensor", NVS_READWRITE, &handle));
+
+    esp_err_t err = nvs_get_u32(handle, "boot_id", &boot_id);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_ERROR_CHECK(err);
+    }
+
+    if (boot_id == UINT32_MAX) {
+        printf("Boot ID exhausted\n");
+        abort();
+    }
+
+    boot_id++;
+    ESP_ERROR_CHECK(nvs_set_u32(handle, "boot_id", boot_id));
+    ESP_ERROR_CHECK(nvs_commit(handle));
+    nvs_close(handle);
+
+    return boot_id;
+}
+
 void app_main(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -60,6 +86,8 @@ void app_main(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+    uint32_t boot_id = next_boot_id();
+    printf("boot_id=%lu\n", (unsigned long)boot_id);
 
     esp_bt_controller_config_t bt_config = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_bt_controller_init(&bt_config));

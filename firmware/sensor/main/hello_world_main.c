@@ -20,12 +20,13 @@ static esp_ble_adv_params_t adv_params = {
 
 static uint8_t sensor_data[] = {
     0xFF, 0xFF,       // 測試用識別欄位
-    0x02,             // 格式版本
+    0x03,             // 格式版本
     0x01,             // 模擬感測器編號
     0x01, 0x00,       // 測試用事件編號：1
     0x01,             // 模擬活動：1
     0x00,             // 模擬按鈕：0
-    0x00, 0x00, 0x00, 0x00  // 啟動編號，稍後填入
+    0x00, 0x00, 0x00, 0x00, // 啟動編號
+    0x00, 0x00                // 事件編號的高 2 位元組
 };
 
 static esp_ble_adv_data_t adv_data = {
@@ -116,8 +117,9 @@ void app_main(void)
         const char *motion = (count % 2 == 0) ? "active" : "motionless";
         const char *button = (count % 4 == 3) ? "pressed" : "released";
 
-        unsigned int event_id = (count + 1) & 0xFFFF;
-        sensor_data[4] = event_id & 0xFF;
+        unsigned int event_id = count + 1;
+        sensor_data[12] = (event_id >> 16) & 0xFF;
+        sensor_data[13] = (event_id >> 24) & 0xFF;sensor_data[4] = event_id & 0xFF;
         sensor_data[5] = (event_id >> 8) & 0xFF;
         sensor_data[6] = (count % 2 == 0) ? 1 : 0;
         sensor_data[7] = (count % 4 == 3) ? 1 : 0;

@@ -45,6 +45,14 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
         esp_ble_gap_start_advertising(&adv_params);
     }
 
+    if (event == ESP_GAP_BLE_ADV_START_COMPLETE_EVT) {
+        if (param->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+            printf("BLE advertising started\n");
+        } else {
+            printf("BLE advertising start failed\n");
+        }
+    }
+
     if (event == ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT) {
         if (param->adv_stop_cmpl.status == ESP_BT_STATUS_SUCCESS) {
             ESP_ERROR_CHECK(esp_ble_gap_config_adv_data(&adv_data));

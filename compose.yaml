@@ -1,4 +1,23 @@
 services:
+  nocobase:
+    image: nocobase/nocobase:2.1.31
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      APP_KEY: ${APP_KEY:?請先設定 APP_KEY}
+      DB_DIALECT: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: motion
+      DB_USER: motion
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?請先設定資料庫密碼}
+      TZ: Asia/Taipei
+    ports:
+      - "127.0.0.1:13003:80"
+    volumes:
+      - motion_nocobase_storage:/app/nocobase/storage
+
   postgres:
     image: postgres:16
     restart: unless-stopped
@@ -11,4 +30,5 @@ services:
       - motion_postgres_data:/var/lib/postgresql/data
 
 volumes:
+  motion_nocobase_storage:
   motion_postgres_data:

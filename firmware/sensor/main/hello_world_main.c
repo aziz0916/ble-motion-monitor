@@ -43,9 +43,13 @@ static SemaphoreHandle_t advertising_started;
 static void gap_callback(esp_gap_ble_cb_event_t event,
                          esp_ble_gap_cb_param_t *param)
 {
-    if (event == ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT &&
-        param->adv_data_cmpl.status == ESP_BT_STATUS_SUCCESS) {
-        esp_ble_gap_start_advertising(&adv_params);
+    if (event == ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT) {
+        if (param->adv_data_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+            ESP_ERROR_CHECK(esp_ble_gap_start_advertising(&adv_params));
+        } else {
+            printf("BLE advertising data configuration failed: %d\n",
+                   param->adv_data_cmpl.status);
+        }
     }
 
     if (event == ESP_GAP_BLE_ADV_START_COMPLETE_EVT) {

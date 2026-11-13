@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: motion
+      POSTGRES_USER: motion
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?請先設定資料庫密碼}
+      TZ: Asia/Taipei
+    volumes:
+      - motion_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  motion_postgres_data:

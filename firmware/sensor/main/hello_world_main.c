@@ -93,13 +93,7 @@ static uint32_t next_boot_id(void)
 
 void app_main(void)
 {
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
-        err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
+    ESP_ERROR_CHECK(nvs_flash_init());
     uint32_t boot_id = next_boot_id();
     printf("boot_id=%lu\n", (unsigned long)boot_id);
     sensor_data[8] = boot_id & 0xFF;

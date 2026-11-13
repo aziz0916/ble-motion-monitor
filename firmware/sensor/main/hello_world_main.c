@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_err.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
@@ -37,6 +38,8 @@ static esp_ble_adv_data_t adv_data = {
     .p_manufacturer_data = sensor_data,
 };
 
+static SemaphoreHandle_t advertising_started;
+
 static void gap_callback(esp_gap_ble_cb_event_t event,
                          esp_ble_gap_cb_param_t *param)
 {
@@ -48,6 +51,7 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
     if (event == ESP_GAP_BLE_ADV_START_COMPLETE_EVT) {
         if (param->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
             printf("BLE advertising started\n");
+            xSemaphoreGive(advertising_started);            
         } else {
             printf("BLE advertising start failed\n");
         }
@@ -114,14 +118,17 @@ void app_main(void)
 
     printf("BLE initialized\n");
 
+    advertising_started = xSemaphoreCreateBinary();
+    assert(advertising_started != NULL);
+
     ESP_ERROR_CHECK(esp_ble_gap_register_callback(gap_callback));
     ESP_ERROR_CHECK(esp_ble_gap_set_device_name("BLE_Motion"));
     ESP_ERROR_CHECK(esp_ble_gap_config_adv_data(&adv_data));
 
     unsigned int count = 0;
-    vTaskDelay(pdMS_TO_TICKS(1000));
 
     while (1) {
+        xSemaphoreTake(advertising_started, portMAX_DELAY);
         const char *motion = (count % 2 == 0) ? "active" : "motionless";
         const char *button = (count % 4 == 3) ? "pressed" : "released";
 

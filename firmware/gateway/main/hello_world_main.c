@@ -12,6 +12,19 @@
 #include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
+
+typedef struct {
+    uint8_t sensor_id;
+    uint32_t boot_id;
+    uint32_t event_id;
+    uint8_t motion;
+    uint8_t button;
+    int rssi;
+    uint8_t version;
+} sensor_event_t;
+
+static QueueHandle_t event_queue;
 
 static void http_test_task(void *arg)
 {
@@ -37,6 +50,67 @@ static void http_test_task(void *arg)
 
     esp_http_client_cleanup(client);
     vTaskDelete(NULL);
+}
+
+static void event_upload_task(void *arg)
+{
+    sensor_event_t event;
+
+    while (1) {
+        if (xQueueReceive(event_queue, &event, portMAX_DELAY) != pdPASS) {
+            continue;
+        }
+
+        char body[256];
+        snprintf(body, sizeof(body),
+                 "{\"sensor_id\":%u,\"boot_id\":%lu,\"event_id\":%lu,"
+                 "\"motion\":%u,\"button\":%u,\"rssi\":%d,\"version\":%u}",
+                 (unsigned int)event.sensor_id,
+                 (unsigned long)event.boot_id,
+                 (unsigned long)event.event_id,
+                 (unsigned int)event.motion,
+                 (unsigned int)event.button,
+                 event.rssi,
+                 (unsigned int)event.version);
+
+        char authorization[sizeof(CONFIG_GATEWAY_API_KEY) + sizeof("Bearer ")];
+        snprintf(authorization, sizeof(authorization),
+                 "Bearer %s", CONFIG_GATEWAY_API_KEY);
+
+        esp_http_client_config_t config = {
+            .url = CONFIG_GATEWAY_EVENT_URL,
+            .timeout_ms = 10000,
+        };
+
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        if (client == NULL) {
+            printf("Event upload: client initialization failed\n");
+            continue;
+        }
+
+        esp_err_t err = esp_http_client_set_method(client, HTTP_METHOD_POST);
+        if (err == ESP_OK) {
+            err = esp_http_client_set_header(client, "Authorization", authorization);
+        }
+        if (err == ESP_OK) {
+            err = esp_http_client_set_header(client, "Content-Type", "application/json");
+        }
+        if (err == ESP_OK) {
+            err = esp_http_client_set_post_field(client, body, strlen(body));
+        }
+        if (err == ESP_OK) {
+            err = esp_http_client_perform(client);
+        }
+
+        if (err == ESP_OK) {
+            printf("Event upload HTTP status: %d\n",
+                   esp_http_client_get_status_code(client));
+        } else {
+            printf("Event upload failed: %s\n", esp_err_to_name(err));
+        }
+
+        esp_http_client_cleanup(client);
+    }
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
@@ -164,10 +238,24 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
                         last_event[sensor_id] == event_id) {
                         printf("duplicate event\n");
                     } else {
-                        seen[sensor_id] = true;
-                        last_event[sensor_id] = event_id;
-                        last_boot[sensor_id] = boot_id;
-                        printf("new event\n");
+                        sensor_event_t event = {
+                            .sensor_id = sensor_id,
+                            .boot_id = boot_id,
+                            .event_id = event_id,
+                            .motion = data[6],
+                            .button = data[7],
+                            .rssi = param->scan_rst.rssi,
+                            .version = data[2],
+                        };
+
+                        if (xQueueSend(event_queue, &event, 0) == pdPASS) {
+                            seen[sensor_id] = true;
+                            last_event[sensor_id] = event_id;
+                            last_boot[sensor_id] = boot_id;
+                            printf("new event queued\n");
+                        } else {
+                            printf("event queue full\n");
+                        }
                     }
                     printf("version=%u, sensor=%u, event=%lu, motion=%u, button=%u\n",
                            data[2], data[3], (unsigned long)event_id, data[6], data[7]);
@@ -179,6 +267,18 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
 
 void app_main(void)
 {
+    event_queue = xQueueCreate(16, sizeof(sensor_event_t));
+    if (event_queue == NULL) {
+        printf("Failed to create event queue\n");
+        abort();
+    }
+
+    if (xTaskCreate(event_upload_task, "event_upload",
+                8192, NULL, 5, NULL) != pdPASS) {
+        printf("Failed to create event upload task\n");
+        abort();
+    }
+    
     ESP_ERROR_CHECK(nvs_flash_init());
 
     wifi_init();

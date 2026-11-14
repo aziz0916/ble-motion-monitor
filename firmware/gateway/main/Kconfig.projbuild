@@ -18,4 +18,16 @@ menu "Gateway Wi-Fi configuration"
         help
             HTTP URL used to test the gateway connection.
 
+    config GATEWAY_API_KEY
+        string "Gateway API key"
+        default ""
+        help
+            API key used by the gateway to submit sensor events.
+
+    config GATEWAY_EVENT_URL
+        string "Gateway event API URL"
+        default ""
+        help
+            URL used by the gateway to submit sensor events.
+
 endmenu

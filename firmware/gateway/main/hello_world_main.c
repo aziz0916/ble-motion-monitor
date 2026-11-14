@@ -9,6 +9,35 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
+#include "esp_http_client.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+static void http_test_task(void *arg)
+{
+    esp_http_client_config_t config = {
+        .url = CONFIG_GATEWAY_HTTP_TEST_URL,
+        .timeout_ms = 10000,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        printf("HTTP client initialization failed\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    esp_err_t err = esp_http_client_perform(client);
+    if (err == ESP_OK) {
+        printf("HTTP test status: %d\n",
+               esp_http_client_get_status_code(client));
+    } else {
+        printf("HTTP test failed: %s\n", esp_err_to_name(err));
+    }
+
+    esp_http_client_cleanup(client);
+    vTaskDelete(NULL);
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -22,6 +51,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         printf("Wi-Fi connected, IP: " IPSTR "\n", IP2STR(&event->ip_info.ip));
+        if (xTaskCreate(http_test_task, "http_test", 8192, NULL, 5, NULL) != pdPASS) {
+            printf("HTTP test task creation failed\n");
+        }
     }
 }
 

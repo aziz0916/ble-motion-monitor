@@ -12,4 +12,10 @@ menu "Gateway Wi-Fi configuration"
         help
             Password for the gateway Wi-Fi network.
 
+    config GATEWAY_HTTP_TEST_URL
+        string "Gateway HTTP test URL"
+        default ""
+        help
+            HTTP URL used to test the gateway connection.
+
 endmenu

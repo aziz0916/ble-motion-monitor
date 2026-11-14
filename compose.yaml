@@ -14,7 +14,7 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:?請先設定資料庫密碼}
       TZ: Asia/Taipei
     ports:
-      - "127.0.0.1:13003:80"
+      - "0.0.0.0:13003:80"
     volumes:
       - motion_nocobase_storage:/app/nocobase/storage
 

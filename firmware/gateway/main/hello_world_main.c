@@ -77,39 +77,50 @@ static void event_upload_task(void *arg)
         snprintf(authorization, sizeof(authorization),
                  "Bearer %s", CONFIG_GATEWAY_API_KEY);
 
-        esp_http_client_config_t config = {
-            .url = CONFIG_GATEWAY_EVENT_URL,
-            .timeout_ms = 10000,
-        };
+        while (1) {
+            esp_http_client_config_t config = {
+                .url = CONFIG_GATEWAY_EVENT_URL,
+                .timeout_ms = 10000,
+            };
 
-        esp_http_client_handle_t client = esp_http_client_init(&config);
-        if (client == NULL) {
-            printf("Event upload: client initialization failed\n");
-            continue;
-        }
+            esp_http_client_handle_t client = esp_http_client_init(&config);
+            if (client == NULL) {
+                printf("Event upload: client initialization failed\n");
+                vTaskDelay(pdMS_TO_TICKS(5000));
+                continue;
+            }
 
-        esp_err_t err = esp_http_client_set_method(client, HTTP_METHOD_POST);
-        if (err == ESP_OK) {
-            err = esp_http_client_set_header(client, "Authorization", authorization);
-        }
-        if (err == ESP_OK) {
-            err = esp_http_client_set_header(client, "Content-Type", "application/json");
-        }
-        if (err == ESP_OK) {
-            err = esp_http_client_set_post_field(client, body, strlen(body));
-        }
-        if (err == ESP_OK) {
-            err = esp_http_client_perform(client);
-        }
+            esp_err_t err = esp_http_client_set_method(client, HTTP_METHOD_POST);
+            if (err == ESP_OK) {
+                err = esp_http_client_set_header(client, "Authorization", authorization);
+            }
+            if (err == ESP_OK) {
+                err = esp_http_client_set_header(client, "Content-Type", "application/json");
+            }
+            if (err == ESP_OK) {
+                err = esp_http_client_set_post_field(client, body, strlen(body));
+            }
+            if (err == ESP_OK) {
+                err = esp_http_client_perform(client);
+            }
 
-        if (err == ESP_OK) {
-            printf("Event upload HTTP status: %d\n",
-                   esp_http_client_get_status_code(client));
-        } else {
-            printf("Event upload failed: %s\n", esp_err_to_name(err));
-        }
+            int status = 0;
+            if (err == ESP_OK) {
+                status = esp_http_client_get_status_code(client);
+                printf("Event upload HTTP status: %d\n", status);
+            } else {
+                printf("Event upload failed: %s\n", esp_err_to_name(err));
+            }
 
-        esp_http_client_cleanup(client);
+            esp_http_client_cleanup(client);
+
+            if (err == ESP_OK && status >= 200 && status < 300) {
+                break;
+            }
+
+            printf("Event upload will retry in 5 seconds\n");
+            vTaskDelay(pdMS_TO_TICKS(5000));
+        }
     }
 }
 

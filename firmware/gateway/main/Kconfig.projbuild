@@ -1,0 +1,15 @@
+menu "Gateway Wi-Fi configuration"
+
+    config GATEWAY_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+            Name of the Wi-Fi network used by the gateway.
+
+    config GATEWAY_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+        help
+            Password for the gateway Wi-Fi network.
+
+endmenu

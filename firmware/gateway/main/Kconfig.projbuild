@@ -30,4 +30,10 @@ menu "Gateway Wi-Fi configuration"
         help
             URL used by the gateway to submit sensor events.
 
+    config GATEWAY_EVENT_LIST_URL
+        string "Gateway event list API URL"
+        default ""
+        help
+            URL used by the gateway to query sensor events.
+
 endmenu

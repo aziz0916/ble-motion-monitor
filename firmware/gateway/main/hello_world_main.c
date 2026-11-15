@@ -10,6 +10,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_http_client.h"
+#include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -50,6 +51,126 @@ static void http_test_task(void *arg)
 
     esp_http_client_cleanup(client);
     vTaskDelete(NULL);
+}
+
+typedef struct {
+    char data[1024];
+    size_t length;
+    bool overflow;
+} event_response_t;
+
+static esp_err_t event_response_handler(esp_http_client_event_t *event)
+{
+    if (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0) {
+        event_response_t *response = event->user_data;
+        size_t incoming = (size_t)event->data_len;
+
+        if (response == NULL ||
+            incoming > sizeof(response->data) - 1 - response->length) {
+            if (response != NULL) {
+                response->overflow = true;
+            }
+            return ESP_FAIL;
+        }
+
+        memcpy(response->data + response->length, event->data, incoming);
+        response->length += incoming;
+        response->data[response->length] = '\0';
+    }
+
+    return ESP_OK;
+}
+
+static bool json_number_matches(const cJSON *object, const char *name,
+                                double expected)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+    return cJSON_IsNumber(item) && item->valuedouble == expected;
+}
+
+static bool event_response_matches(const char *body,
+                                   const sensor_event_t *event)
+{
+    cJSON *root = cJSON_Parse(body);
+    if (root == NULL) {
+        return false;
+    }
+
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    bool matches = false;
+
+    if (cJSON_IsArray(data) && cJSON_GetArraySize(data) == 1) {
+        const cJSON *item = cJSON_GetArrayItem(data, 0);
+        matches =
+            cJSON_IsObject(item) &&
+            json_number_matches(item, "sensor_id", event->sensor_id) &&
+            json_number_matches(item, "boot_id", event->boot_id) &&
+            json_number_matches(item, "event_id", event->event_id) &&
+            json_number_matches(item, "motion", event->motion) &&
+            json_number_matches(item, "button", event->button) &&
+            json_number_matches(item, "version", event->version);
+    }
+
+    cJSON_Delete(root);
+    return matches;
+}
+
+static bool event_already_recorded(const sensor_event_t *event,
+                                   const char *authorization)
+{
+    char url[512];
+
+    int written = snprintf(
+        url, sizeof(url),
+        "%s?filter=%%7B%%22sensor_id%%22%%3A%u%%2C"
+        "%%22boot_id%%22%%3A%lu%%2C"
+        "%%22event_id%%22%%3A%lu%%7D"
+        "&fields=sensor_id,boot_id,event_id,motion,button,version",
+        CONFIG_GATEWAY_EVENT_LIST_URL,
+        (unsigned int)event->sensor_id,
+        (unsigned long)event->boot_id,
+        (unsigned long)event->event_id);
+
+    if (written < 0 || (size_t)written >= sizeof(url)) {
+        printf("Event check: URL is too long\n");
+        return false;
+    }
+
+    event_response_t response = {0};
+
+    esp_http_client_config_t config = {
+        .url = url,
+        .timeout_ms = 10000,
+        .event_handler = event_response_handler,
+        .user_data = &response,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        printf("Event check: client initialization failed\n");
+        return false;
+    }
+
+    esp_err_t err =
+        esp_http_client_set_header(client, "Authorization", authorization);
+    if (err == ESP_OK) {
+        err = esp_http_client_perform(client);
+    }
+
+    int status = 0;
+    if (err == ESP_OK) {
+        status = esp_http_client_get_status_code(client);
+    }
+
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK || status != 200 || response.overflow) {
+        printf("Event check failed: %s, HTTP status: %d\n",
+               esp_err_to_name(err), status);
+        return false;
+    }
+
+    return event_response_matches(response.data, event);
 }
 
 static void event_upload_task(void *arg)
@@ -115,6 +236,11 @@ static void event_upload_task(void *arg)
             esp_http_client_cleanup(client);
 
             if (err == ESP_OK && status >= 200 && status < 300) {
+                break;
+            }
+
+            if (event_already_recorded(&event, authorization)) {
+                printf("Event already recorded; upload confirmed\n");
                 break;
             }
 
@@ -289,7 +415,7 @@ void app_main(void)
         printf("Failed to create event upload task\n");
         abort();
     }
-    
+
     ESP_ERROR_CHECK(nvs_flash_init());
 
     wifi_init();

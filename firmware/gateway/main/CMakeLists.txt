@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "hello_world_main.c"
+    SRCS "hello_world_main.c" "event_store.c"
     INCLUDE_DIRS "."
     REQUIRES bt nvs_flash spi_flash esp_wifi esp_event esp_netif esp_http_client json
 )

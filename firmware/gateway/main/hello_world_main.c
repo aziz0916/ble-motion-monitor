@@ -14,18 +14,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
-
-typedef struct {
-    uint8_t sensor_id;
-    uint32_t boot_id;
-    uint32_t event_id;
-    uint8_t motion;
-    uint8_t button;
-    int rssi;
-    uint8_t version;
-} sensor_event_t;
+#include "event_store.h"
+#include "freertos/semphr.h"
 
 static QueueHandle_t event_queue;
+static SemaphoreHandle_t event_store_mutex;
 
 static void http_test_task(void *arg)
 {
@@ -173,12 +166,51 @@ static bool event_already_recorded(const sensor_event_t *event,
     return event_response_matches(response.data, event);
 }
 
+static void event_store_task(void *arg)
+{
+    sensor_event_t event;
+
+    while (1) {
+        if (xQueuePeek(event_queue, &event, portMAX_DELAY) != pdPASS) {
+            continue;
+        }
+
+        xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+        esp_err_t err = event_store_add(&event);
+        xSemaphoreGive(event_store_mutex);
+
+        if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
+            if (xQueueReceive(event_queue, &event, 0) == pdPASS) {
+                printf("Event saved or already in storage\n");
+            }
+        } else {
+            printf("Event storage failed: %s; retrying in 5 seconds\n",
+                   esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(5000));
+        }
+    }
+}
+
 static void event_upload_task(void *arg)
 {
     sensor_event_t event;
 
     while (1) {
-        if (xQueueReceive(event_queue, &event, portMAX_DELAY) != pdPASS) {
+        bool found = false;
+
+        xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+        esp_err_t store_err = event_store_peek(&event, &found);
+        xSemaphoreGive(event_store_mutex);
+
+        if (store_err != ESP_OK) {
+            printf("Event storage read failed: %s\n",
+                esp_err_to_name(store_err));
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            continue;
+        }
+
+        if (!found) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
@@ -245,6 +277,21 @@ static void event_upload_task(void *arg)
             }
 
             printf("Event upload will retry in 5 seconds\n");
+            vTaskDelay(pdMS_TO_TICKS(5000));
+        }
+
+        while (1) {
+            xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+            esp_err_t remove_err = event_store_remove(&event);
+            xSemaphoreGive(event_store_mutex);
+
+            if (remove_err == ESP_OK || remove_err == ESP_ERR_NVS_NOT_FOUND) {
+                printf("Confirmed event removed from storage\n");
+                break;
+            }
+
+            printf("Event removal failed: %s; retrying in 5 seconds\n",
+                   esp_err_to_name(remove_err));
             vTaskDelay(pdMS_TO_TICKS(5000));
         }
     }
@@ -410,15 +457,29 @@ void app_main(void)
         abort();
     }
 
-    if (xTaskCreate(event_upload_task, "event_upload",
-                8192, NULL, 5, NULL) != pdPASS) {
-        printf("Failed to create event upload task\n");
+    ESP_ERROR_CHECK(nvs_flash_init());
+    ESP_ERROR_CHECK(event_store_init());
+    printf("Event storage initialized\n");
+
+    event_store_mutex = xSemaphoreCreateMutex();
+    if (event_store_mutex == NULL) {
+        printf("Failed to create event storage mutex\n");
         abort();
     }
 
-    ESP_ERROR_CHECK(nvs_flash_init());
-
     wifi_init();
+
+    if (xTaskCreate(event_store_task, "event_store",
+                4096, NULL, 5, NULL) != pdPASS) {
+        printf("Failed to create event storage task\n");
+        abort();
+    }
+
+    if (xTaskCreate(event_upload_task, "event_upload",
+            8192, NULL, 5, NULL) != pdPASS) {
+        printf("Failed to create event upload task\n");
+        abort();
+    }
 
     esp_bt_controller_config_t bt_config =
         BT_CONTROLLER_INIT_CONFIG_DEFAULT();

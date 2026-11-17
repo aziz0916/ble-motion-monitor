@@ -51,3 +51,13 @@ Please use the following feedback channels:
 * For a feature request or bug report, create a [GitHub issue](https://github.com/espressif/esp-idf/issues)
 
 We will get back to you as soon as possible.
+
+## 網關離線事件保存
+
+- 網關使用獨立的 `events` NVS 分割區，最多保存 128 筆待上傳事件。
+- 事件成功寫入 NVS 後，網關重新啟動仍會恢復並重試上傳。
+- 上傳成功，或後端確認已有內容一致的相同事件後，網關才會移除本機副本。
+- 若識別碼相同但內容不一致，網關會保留該事件並持續重試；目前這會阻擋後續事件上傳。
+- 儲存區滿載時，新事件暫時等待在最多 16 筆的 RAM 佇列；在寫入 NVS 前重啟可能遺失。佇列滿後也可能無法接收更多事件。
+- 感測器使用 BLE 廣播；網關未收到的事件不在離線保存範圍內。
+- 此版本使用 NVS 進行功能驗證。長期頻繁寫入時，仍需評估 Flash 壽命與可靠度。

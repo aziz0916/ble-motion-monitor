@@ -19,3 +19,6 @@ esp_err_t event_store_init(void);
 esp_err_t event_store_add(const sensor_event_t *event);
 esp_err_t event_store_peek(sensor_event_t *event, bool *found);
 esp_err_t event_store_remove(const sensor_event_t *event);
+esp_err_t event_store_mark_conflict(const sensor_event_t *event);
+esp_err_t event_store_peek_conflict(sensor_event_t *event, bool *found);
+esp_err_t event_store_release_conflict(const sensor_event_t *event);

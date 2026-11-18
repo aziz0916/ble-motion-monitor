@@ -74,6 +74,13 @@ static esp_err_t event_response_handler(esp_http_client_event_t *event)
     return ESP_OK;
 }
 
+typedef enum {
+    EVENT_CHECK_MATCH,
+    EVENT_CHECK_CONFLICT,
+    EVENT_CHECK_NOT_FOUND,
+    EVENT_CHECK_ERROR
+} event_check_result_t;
+
 static bool json_number_matches(const cJSON *object, const char *name,
                                 double expected)
 {
@@ -81,35 +88,58 @@ static bool json_number_matches(const cJSON *object, const char *name,
     return cJSON_IsNumber(item) && item->valuedouble == expected;
 }
 
-static bool event_response_matches(const char *body,
-                                   const sensor_event_t *event)
+static event_check_result_t event_response_matches(
+    const char *body, const sensor_event_t *event)
 {
     cJSON *root = cJSON_Parse(body);
     if (root == NULL) {
-        return false;
+        return EVENT_CHECK_ERROR;
     }
 
+    event_check_result_t result = EVENT_CHECK_ERROR;
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
-    bool matches = false;
 
-    if (cJSON_IsArray(data) && cJSON_GetArraySize(data) == 1) {
-        const cJSON *item = cJSON_GetArrayItem(data, 0);
-        matches =
-            cJSON_IsObject(item) &&
-            json_number_matches(item, "sensor_id", event->sensor_id) &&
-            json_number_matches(item, "boot_id", event->boot_id) &&
-            json_number_matches(item, "event_id", event->event_id) &&
-            json_number_matches(item, "motion", event->motion) &&
-            json_number_matches(item, "button", event->button) &&
-            json_number_matches(item, "version", event->version);
+    if (cJSON_IsArray(data)) {
+        int count = cJSON_GetArraySize(data);
+
+        if (count == 0) {
+            result = EVENT_CHECK_NOT_FOUND;
+        } else if (count == 1) {
+            const cJSON *item = cJSON_GetArrayItem(data, 0);
+
+            if (cJSON_IsObject(item) &&
+                json_number_matches(item, "sensor_id", event->sensor_id) &&
+                json_number_matches(item, "boot_id", event->boot_id) &&
+                json_number_matches(item, "event_id", event->event_id)) {
+
+                const cJSON *motion =
+                    cJSON_GetObjectItemCaseSensitive(item, "motion");
+                const cJSON *button =
+                    cJSON_GetObjectItemCaseSensitive(item, "button");
+                const cJSON *version =
+                    cJSON_GetObjectItemCaseSensitive(item, "version");
+
+                if (cJSON_IsNumber(motion) &&
+                    cJSON_IsNumber(button) &&
+                    cJSON_IsNumber(version)) {
+                    if (json_number_matches(item, "motion", event->motion) &&
+                        json_number_matches(item, "button", event->button) &&
+                        json_number_matches(item, "version", event->version)) {
+                        result = EVENT_CHECK_MATCH;
+                    } else {
+                        result = EVENT_CHECK_CONFLICT;
+                    }
+                }
+            }
+        }
     }
 
     cJSON_Delete(root);
-    return matches;
+    return result;
 }
 
-static bool event_already_recorded(const sensor_event_t *event,
-                                   const char *authorization)
+static event_check_result_t event_already_recorded(
+    const sensor_event_t *event, const char *authorization)
 {
     char url[512];
 
@@ -126,7 +156,7 @@ static bool event_already_recorded(const sensor_event_t *event,
 
     if (written < 0 || (size_t)written >= sizeof(url)) {
         printf("Event check: URL is too long\n");
-        return false;
+        return EVENT_CHECK_ERROR;
     }
 
     event_response_t response = {0};
@@ -141,7 +171,7 @@ static bool event_already_recorded(const sensor_event_t *event,
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == NULL) {
         printf("Event check: client initialization failed\n");
-        return false;
+        return EVENT_CHECK_ERROR;
     }
 
     esp_err_t err =
@@ -160,10 +190,52 @@ static bool event_already_recorded(const sensor_event_t *event,
     if (err != ESP_OK || status != 200 || response.overflow) {
         printf("Event check failed: %s, HTTP status: %d\n",
                esp_err_to_name(err), status);
-        return false;
+        return EVENT_CHECK_ERROR;
     }
 
     return event_response_matches(response.data, event);
+}
+
+static void conflict_check_task(void *arg)
+{
+    char authorization[sizeof(CONFIG_GATEWAY_API_KEY) + sizeof("Bearer ")];
+    snprintf(authorization, sizeof(authorization),
+             "Bearer %s", CONFIG_GATEWAY_API_KEY);
+
+    while (1) {
+        sensor_event_t event;
+        bool found = false;
+
+        xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+        esp_err_t err = event_store_peek_conflict(&event, &found);
+        xSemaphoreGive(event_store_mutex);
+
+        if (err != ESP_OK) {
+            printf("Conflict storage read failed: %s\n",
+                   esp_err_to_name(err));
+        } else if (found) {
+            event_check_result_t result =
+                event_already_recorded(&event, authorization);
+
+            if (result == EVENT_CHECK_MATCH) {
+                xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+                err = event_store_release_conflict(&event);
+                xSemaphoreGive(event_store_mutex);
+
+                if (err == ESP_OK) {
+                    printf("Conflict released: sensor=%u, boot=%lu, event=%lu\n",
+                           (unsigned int)event.sensor_id,
+                           (unsigned long)event.boot_id,
+                           (unsigned long)event.event_id);
+                } else {
+                    printf("Conflict release failed: %s\n",
+                           esp_err_to_name(err));
+                }
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(60000));
+    }
 }
 
 static void event_store_task(void *arg)
@@ -230,6 +302,8 @@ static void event_upload_task(void *arg)
         snprintf(authorization, sizeof(authorization),
                  "Bearer %s", CONFIG_GATEWAY_API_KEY);
 
+        bool quarantined = false;
+
         while (1) {
             esp_http_client_config_t config = {
                 .url = CONFIG_GATEWAY_EVENT_URL,
@@ -271,13 +345,44 @@ static void event_upload_task(void *arg)
                 break;
             }
 
-            if (event_already_recorded(&event, authorization)) {
+            event_check_result_t check_result =
+    event_already_recorded(&event, authorization);
+
+            if (check_result == EVENT_CHECK_MATCH) {
                 printf("Event already recorded; upload confirmed\n");
                 break;
             }
 
+            if (check_result == EVENT_CHECK_CONFLICT) {
+                xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+                esp_err_t mark_err = event_store_mark_conflict(&event);
+                xSemaphoreGive(event_store_mutex);
+
+                if (mark_err == ESP_OK) {
+                    printf("Event content conflict quarantined: sensor=%u, boot=%lu, event=%lu\n",
+       (unsigned int)event.sensor_id,
+       (unsigned long)event.boot_id,
+       (unsigned long)event.event_id);
+                    quarantined = true;
+                    break;
+                }
+
+                printf("Failed to quarantine event: %s\n",
+                    esp_err_to_name(mark_err));
+            }
+
+            if (check_result == EVENT_CHECK_NOT_FOUND) {
+                printf("Event check: record not found; retaining event\n");
+            } else if (check_result == EVENT_CHECK_ERROR) {
+                printf("Event check: unable to verify; retaining event\n");
+            }
+
             printf("Event upload will retry in 5 seconds\n");
             vTaskDelay(pdMS_TO_TICKS(5000));
+        }
+
+        if (quarantined) {
+            continue;
         }
 
         while (1) {
@@ -478,6 +583,12 @@ void app_main(void)
     if (xTaskCreate(event_upload_task, "event_upload",
             8192, NULL, 5, NULL) != pdPASS) {
         printf("Failed to create event upload task\n");
+        abort();
+    }
+
+    if (xTaskCreate(conflict_check_task, "conflict_check",
+                8192, NULL, 5, NULL) != pdPASS) {
+        printf("Failed to create conflict check task\n");
         abort();
     }
 

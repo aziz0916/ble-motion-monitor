@@ -40,6 +40,37 @@ static void local_conflict_slot_key(
     snprintf(key, key_size, "local_%03u", slot);
 }
 
+esp_err_t event_store_get_local_conflict(
+    unsigned int slot, sensor_event_t *original, sensor_event_t *incoming)
+{
+    if (slot >= LOCAL_CONFLICT_CAPACITY ||
+        original == NULL || incoming == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char key[16];
+    local_conflict_t conflict;
+    size_t length = sizeof(conflict);
+
+    local_conflict_slot_key(slot, key, sizeof(key));
+
+    esp_err_t err = nvs_get_blob(
+        event_store_handle, key, &conflict, &length
+    );
+
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (length != sizeof(conflict)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    *original = conflict.original;
+    *incoming = conflict.incoming;
+    return ESP_OK;
+}
+
 esp_err_t event_store_list_local_conflicts(void)
 {
     unsigned int count = 0;
@@ -253,6 +284,43 @@ static bool same_event_content(const sensor_event_t *a,
            a->motion == b->motion &&
            a->button == b->button &&
            a->version == b->version;
+}
+
+esp_err_t event_store_remove_local_conflict(
+    unsigned int slot,
+    const sensor_event_t *original,
+    const sensor_event_t *incoming)
+{
+    if (slot >= LOCAL_CONFLICT_CAPACITY ||
+        original == NULL || incoming == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    sensor_event_t saved_original;
+    sensor_event_t saved_incoming;
+
+    esp_err_t err = event_store_get_local_conflict(
+        slot, &saved_original, &saved_incoming);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (!same_event_content(&saved_original, original) ||
+        !same_event_content(&saved_incoming, incoming) ||
+        saved_original.rssi != original->rssi ||
+        saved_incoming.rssi != incoming->rssi) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char key[16];
+    local_conflict_slot_key(slot, key, sizeof(key));
+
+    err = nvs_erase_key(event_store_handle, key);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    return nvs_commit(event_store_handle);
 }
 
 static esp_err_t local_conflict_contains(const sensor_event_t *event,

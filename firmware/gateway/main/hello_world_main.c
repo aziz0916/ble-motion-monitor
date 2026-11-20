@@ -25,6 +25,10 @@ static void console_task(void *arg)
     char line[64];
     size_t length = 0;
     bool overflow = false;
+    bool removal_pending = false;
+    unsigned int pending_slot = 0;
+    sensor_event_t pending_original;
+    sensor_event_t pending_incoming;
 
     printf("Console ready. Type conflicts and press Enter.\n");
 
@@ -39,11 +43,13 @@ static void console_task(void *arg)
 
         if (ch == '\r' || ch == '\n') {
             if (overflow) {
+                removal_pending = false;
                 printf("Command too long.\n");
             } else if (length > 0) {
                 line[length] = '\0';
 
                 if (strcmp(line, "conflicts") == 0) {
+                    removal_pending = false;
                     xSemaphoreTake(event_store_mutex, portMAX_DELAY);
                     esp_err_t err = event_store_list_local_conflicts();
                     xSemaphoreGive(event_store_mutex);
@@ -52,7 +58,75 @@ static void console_task(void *arg)
                         printf("Local conflict list failed: %s\n",
                                esp_err_to_name(err));
                     }
+                } else if (strcmp(line, "confirm-remove") == 0) {
+                    if (!removal_pending) {
+                        printf("No removal pending. Use inspect <slot> first.\n");
+                    } else {
+                        xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+                        esp_err_t err = event_store_remove_local_conflict(
+                            pending_slot, &pending_original, &pending_incoming);
+                        xSemaphoreGive(event_store_mutex);
+
+                        removal_pending = false;
+
+                        if (err == ESP_OK) {
+                            printf("Local conflict removed: slot=%u\n",
+                                   pending_slot);
+                        } else {
+                            printf("Local conflict removal failed: %s\n",
+                                   esp_err_to_name(err));
+                        }
+                    }
+                } else if (strncmp(line, "inspect ", 8) == 0) {
+                    char extra;
+                    unsigned int slot;
+
+                    removal_pending = false;
+
+                    if (sscanf(line + 8, "%u %c", &slot, &extra) != 1) {
+                        printf("Usage: inspect <slot>\n");
+                    } else {
+                        sensor_event_t original;
+                        sensor_event_t incoming;
+
+                        xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+                        esp_err_t err = event_store_get_local_conflict(
+                            slot, &original, &incoming);
+                        xSemaphoreGive(event_store_mutex);
+
+                        if (err == ESP_OK) {
+                            pending_slot = slot;
+                            pending_original = original;
+                            pending_incoming = incoming;
+                            removal_pending = true;
+
+                            printf("Local conflict slot=%u\n", slot);
+                            printf("Original: sensor=%u, boot=%lu, event=%lu, "
+                                   "motion=%u, button=%u, version=%u, rssi=%d\n",
+                                   (unsigned int)original.sensor_id,
+                                   (unsigned long)original.boot_id,
+                                   (unsigned long)original.event_id,
+                                   (unsigned int)original.motion,
+                                   (unsigned int)original.button,
+                                   (unsigned int)original.version,
+                                   original.rssi);
+                            printf("Incoming: sensor=%u, boot=%lu, event=%lu, "
+                                   "motion=%u, button=%u, version=%u, rssi=%d\n",
+                                   (unsigned int)incoming.sensor_id,
+                                   (unsigned long)incoming.boot_id,
+                                   (unsigned long)incoming.event_id,
+                                   (unsigned int)incoming.motion,
+                                   (unsigned int)incoming.button,
+                                   (unsigned int)incoming.version,
+                                   incoming.rssi);
+                            printf("To remove this record, type confirm-remove.\n");
+                        } else {
+                            printf("Inspect failed: %s\n",
+                                   esp_err_to_name(err));
+                        }
+                    }
                 } else {
+                    removal_pending = false;
                     printf("Unknown command. Type conflicts.\n");
                 }
             }

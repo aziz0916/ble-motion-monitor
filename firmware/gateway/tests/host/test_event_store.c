@@ -133,10 +133,92 @@ static void test_local_conflict_full(void)
     puts("PASS: local conflict storage full");
 }
 
+static void test_get_local_conflict(void)
+{
+    mock_nvs_reset();
+    assert(event_store_init() == ESP_OK);
+
+    sensor_event_t original = make_event(1, 1);
+    sensor_event_t incoming = make_event(1, 0);
+
+    assert(event_store_add(&original) == ESP_OK);
+    assert(event_store_add(&incoming) == ESP_ERR_INVALID_STATE);
+
+    sensor_event_t saved_original;
+    sensor_event_t saved_incoming;
+
+    assert(event_store_get_local_conflict(
+               0, &saved_original, &saved_incoming) == ESP_OK);
+    assert(saved_original.event_id == 1);
+    assert(saved_original.motion == 1);
+    assert(saved_incoming.event_id == 1);
+    assert(saved_incoming.motion == 0);
+
+    assert(event_store_get_local_conflict(
+               1, &saved_original, &saved_incoming) ==
+           ESP_ERR_NVS_NOT_FOUND);
+    assert(event_store_get_local_conflict(
+               LOCAL_CONFLICT_CAPACITY, &saved_original, &saved_incoming) ==
+           ESP_ERR_INVALID_ARG);
+    assert(event_store_get_local_conflict(
+               0, NULL, &saved_incoming) == ESP_ERR_INVALID_ARG);
+    assert(event_store_get_local_conflict(
+               0, &saved_original, NULL) == ESP_ERR_INVALID_ARG);
+
+    puts("PASS: get local conflict");
+}
+
+static void test_remove_local_conflict(void)
+{
+    mock_nvs_reset();
+    assert(event_store_init() == ESP_OK);
+
+    sensor_event_t original = make_event(1, 1);
+    sensor_event_t incoming = make_event(1, 0);
+    sensor_event_t other = incoming;
+    other.button = 1;
+
+    assert(event_store_add(&original) == ESP_OK);
+    assert(event_store_add(&incoming) == ESP_ERR_INVALID_STATE);
+    assert(event_store_add(&other) == ESP_ERR_INVALID_STATE);
+
+    sensor_event_t saved_original;
+    sensor_event_t saved_incoming;
+    assert(event_store_get_local_conflict(
+               0, &saved_original, &saved_incoming) == ESP_OK);
+
+    /* 內容不符時不得刪除。 */
+    sensor_event_t mismatch = saved_incoming;
+    mismatch.motion = 9;
+    assert(event_store_remove_local_conflict(
+               0, &saved_original, &mismatch) == ESP_ERR_INVALID_STATE);
+    assert(event_store_get_local_conflict(
+               0, &saved_original, &saved_incoming) == ESP_OK);
+
+    /* 清除指定紀錄，其他紀錄與待上傳事件必須保留。 */
+    assert(event_store_remove_local_conflict(
+               0, &saved_original, &saved_incoming) == ESP_OK);
+    assert(event_store_get_local_conflict(
+               0, &saved_original, &saved_incoming) ==
+           ESP_ERR_NVS_NOT_FOUND);
+
+    local_conflict_t remaining = read_local(1);
+    assert(remaining.incoming.button == 1);
+
+    bool found = false;
+    sensor_event_t peeked;
+    assert(event_store_peek(&peeked, &found) == ESP_OK);
+    assert(found && peeked.event_id == 1 && peeked.motion == 1);
+
+    puts("PASS: remove local conflict");
+}
+
 int main(void)
 {
     test_conflict_and_replay();
     test_local_conflict_full();
+    test_get_local_conflict();
+    test_remove_local_conflict();
 
     puts("All host tests passed");
     return 0;

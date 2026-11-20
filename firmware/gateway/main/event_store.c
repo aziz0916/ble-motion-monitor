@@ -5,11 +5,17 @@
 #include <stdio.h>
 
 #define EVENT_STORE_CAPACITY 128
+#define LOCAL_CONFLICT_CAPACITY 128
 
 typedef struct {
     uint64_t sequence;
     sensor_event_t event;
 } stored_event_t;
+
+typedef struct {
+    sensor_event_t original;
+    sensor_event_t incoming;
+} local_conflict_t;
 
 static nvs_handle_t event_store_handle;
 static esp_err_t event_slot_is_conflict(
@@ -26,6 +32,12 @@ static void conflict_slot_key(
     unsigned int slot, char *key, size_t key_size)
 {
     snprintf(key, key_size, "conf_%03u", slot);
+}
+
+static void local_conflict_slot_key(
+    unsigned int slot, char *key, size_t key_size)
+{
+    snprintf(key, key_size, "local_%03u", slot);
 }
 
 esp_err_t event_store_init(void)
@@ -86,6 +98,42 @@ esp_err_t event_store_init(void)
             stored.event.rssi);
         }
     }
+
+    unsigned int local_count = 0;
+
+    for (unsigned int slot = 0; slot < LOCAL_CONFLICT_CAPACITY; slot++) {
+        char key[16];
+        local_conflict_t conflict;
+        size_t length = sizeof(conflict);
+
+        local_conflict_slot_key(slot, key, sizeof(key));
+        err = nvs_get_blob(event_store_handle, key, &conflict, &length);
+
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            continue;
+        }
+
+        if (err != ESP_OK || length != sizeof(conflict)) {
+            nvs_close(event_store_handle);
+            return err != ESP_OK ? err : ESP_ERR_INVALID_SIZE;
+        }
+
+        local_count++;
+        printf("Local conflict: slot=%u, sensor=%u, boot=%lu, event=%lu, "
+            "original=%u/%u/v%u, incoming=%u/%u/v%u\n",
+            slot,
+            (unsigned int)conflict.original.sensor_id,
+            (unsigned long)conflict.original.boot_id,
+            (unsigned long)conflict.original.event_id,
+            (unsigned int)conflict.original.motion,
+            (unsigned int)conflict.original.button,
+            (unsigned int)conflict.original.version,
+            (unsigned int)conflict.incoming.motion,
+            (unsigned int)conflict.incoming.button,
+            (unsigned int)conflict.incoming.version);
+    }
+
+    printf("Local conflict storage: %u record(s)\n", local_count);
 
     printf("Event storage: %u saved event(s)\n", count);
     return ESP_OK;
@@ -184,10 +232,182 @@ esp_err_t event_store_peek(sensor_event_t *event, bool *found)
     return ESP_OK;
 }
 
+static bool same_event_content(const sensor_event_t *a,
+                               const sensor_event_t *b)
+{
+    return a->sensor_id == b->sensor_id &&
+           a->boot_id == b->boot_id &&
+           a->event_id == b->event_id &&
+           a->motion == b->motion &&
+           a->button == b->button &&
+           a->version == b->version;
+}
+
+static esp_err_t local_conflict_contains(const sensor_event_t *event,
+                                         bool *found)
+{
+    *found = false;
+
+    for (unsigned int slot = 0; slot < LOCAL_CONFLICT_CAPACITY; slot++) {
+        char key[16];
+        local_conflict_t saved;
+        size_t length = sizeof(saved);
+
+        local_conflict_slot_key(slot, key, sizeof(key));
+        esp_err_t err = nvs_get_blob(
+            event_store_handle, key, &saved, &length);
+
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            continue;
+        }
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (length != sizeof(saved)) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        if (same_event_content(&saved.incoming, event)) {
+            *found = true;
+            return ESP_OK;
+        }
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t local_conflict_find_original(
+    const sensor_event_t *event,
+    sensor_event_t *original,
+    bool *found)
+{
+    *found = false;
+
+    for (unsigned int slot = 0; slot < LOCAL_CONFLICT_CAPACITY; slot++) {
+        char key[16];
+        local_conflict_t saved;
+        size_t length = sizeof(saved);
+
+        local_conflict_slot_key(slot, key, sizeof(key));
+        esp_err_t err = nvs_get_blob(
+            event_store_handle, key, &saved, &length);
+
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            continue;
+        }
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (length != sizeof(saved)) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        if (saved.original.sensor_id == event->sensor_id &&
+            saved.original.boot_id == event->boot_id &&
+            saved.original.event_id == event->event_id) {
+            *original = saved.original;
+            *found = true;
+            return ESP_OK;
+        }
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t save_local_conflict(const sensor_event_t *original,
+                                     const sensor_event_t *incoming)
+{
+    int free_slot = -1;
+
+    for (unsigned int slot = 0; slot < LOCAL_CONFLICT_CAPACITY; slot++) {
+        char key[16];
+        local_conflict_t saved;
+        size_t length = sizeof(saved);
+
+        local_conflict_slot_key(slot, key, sizeof(key));
+        esp_err_t err = nvs_get_blob(
+            event_store_handle, key, &saved, &length);
+
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            if (free_slot < 0) {
+                free_slot = (int)slot;
+            }
+            continue;
+        }
+
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        if (length != sizeof(saved)) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        if (same_event_content(&saved.original, original) &&
+            same_event_content(&saved.incoming, incoming)) {
+            return nvs_commit(event_store_handle);
+        }
+    }
+
+    if (free_slot < 0) {
+        printf("Local conflict storage full; event retained for retry\n");
+        return ESP_ERR_NVS_NOT_ENOUGH_SPACE;
+    }
+
+    local_conflict_t conflict = {
+        .original = *original,
+        .incoming = *incoming,
+    };
+
+    char key[16];
+    local_conflict_slot_key((unsigned int)free_slot, key, sizeof(key));
+
+    esp_err_t err = nvs_set_blob(
+        event_store_handle, key, &conflict, sizeof(conflict));
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_commit(event_store_handle);
+    if (err == ESP_OK) {
+        printf("Local conflict saved: sensor=%u, boot=%lu, event=%lu\n",
+            (unsigned int)incoming->sensor_id,
+            (unsigned long)incoming->boot_id,
+            (unsigned long)incoming->event_id);
+    }
+    return err;
+}
+
 esp_err_t event_store_add(const sensor_event_t *event)
 {
     if (event == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    bool conflict_found = false;
+    esp_err_t conflict_err = local_conflict_contains(event, &conflict_found);
+
+    if (conflict_err != ESP_OK) {
+        return conflict_err;
+    }
+
+    if (conflict_found) {
+        conflict_err = nvs_commit(event_store_handle);
+        return conflict_err == ESP_OK ? ESP_ERR_INVALID_STATE : conflict_err;
+    }
+
+    sensor_event_t conflict_original;
+    bool original_found = false;
+
+    conflict_err = local_conflict_find_original(
+        event, &conflict_original, &original_found);
+    if (conflict_err != ESP_OK) {
+        return conflict_err;
+    }
+
+    if (original_found && !same_event_content(&conflict_original, event)) {
+        conflict_err = save_local_conflict(&conflict_original, event);
+        return conflict_err == ESP_OK ? ESP_ERR_INVALID_STATE : conflict_err;
     }
 
     int free_slot = -1;
@@ -229,7 +449,12 @@ esp_err_t event_store_add(const sensor_event_t *event)
                 return err == ESP_OK ? ESP_ERR_INVALID_STATE : err;
             }
 
-            return ESP_ERR_INVALID_RESPONSE;
+            printf("Local event conflict: sensor=%u, boot=%lu, event=%lu\n",
+                (unsigned int)event->sensor_id,
+                (unsigned long)event->boot_id,
+                (unsigned long)event->event_id);
+            err = save_local_conflict(&stored.event, event);
+            return err == ESP_OK ? ESP_ERR_INVALID_STATE : err;
         }
 
         if (stored.sequence > max_sequence) {

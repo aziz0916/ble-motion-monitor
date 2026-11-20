@@ -20,6 +20,55 @@
 static QueueHandle_t event_queue;
 static SemaphoreHandle_t event_store_mutex;
 
+static void console_task(void *arg)
+{
+    char line[64];
+    size_t length = 0;
+    bool overflow = false;
+
+    printf("Console ready. Type conflicts and press Enter.\n");
+
+    while (1) {
+        int ch = getchar();
+
+        if (ch == EOF) {
+            clearerr(stdin);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        if (ch == '\r' || ch == '\n') {
+            if (overflow) {
+                printf("Command too long.\n");
+            } else if (length > 0) {
+                line[length] = '\0';
+
+                if (strcmp(line, "conflicts") == 0) {
+                    xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+                    esp_err_t err = event_store_list_local_conflicts();
+                    xSemaphoreGive(event_store_mutex);
+
+                    if (err != ESP_OK) {
+                        printf("Local conflict list failed: %s\n",
+                               esp_err_to_name(err));
+                    }
+                } else {
+                    printf("Unknown command. Type conflicts.\n");
+                }
+            }
+
+            length = 0;
+            overflow = false;
+        } else if (!overflow) {
+            if (length < sizeof(line) - 1) {
+                line[length++] = (char)ch;
+            } else {
+                overflow = true;
+            }
+        }
+    }
+}
+
 static void http_test_task(void *arg)
 {
     esp_http_client_config_t config = {
@@ -569,6 +618,11 @@ void app_main(void)
     event_store_mutex = xSemaphoreCreateMutex();
     if (event_store_mutex == NULL) {
         printf("Failed to create event storage mutex\n");
+        abort();
+    }
+
+    if (xTaskCreate(console_task, "console", 4096, NULL, 5, NULL) != pdPASS) {
+        printf("Failed to create console task\n");
         abort();
     }
 

@@ -40,6 +40,48 @@ static void local_conflict_slot_key(
     snprintf(key, key_size, "local_%03u", slot);
 }
 
+esp_err_t event_store_list_local_conflicts(void)
+{
+    unsigned int count = 0;
+
+    for (unsigned int slot = 0; slot < LOCAL_CONFLICT_CAPACITY; slot++) {
+        char key[16];
+        local_conflict_t conflict;
+        size_t length = sizeof(conflict);
+
+        local_conflict_slot_key(slot, key, sizeof(key));
+
+        esp_err_t err = nvs_get_blob(
+            event_store_handle, key, &conflict, &length
+        );
+
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            continue;
+        }
+
+        if (err != ESP_OK || length != sizeof(conflict)) {
+            return err != ESP_OK ? err : ESP_ERR_INVALID_SIZE;
+        }
+
+        count++;
+        printf("Local conflict: slot=%u, sensor=%u, boot=%lu, event=%lu, "
+               "original=%u/%u/v%u, incoming=%u/%u/v%u\n",
+               slot,
+               (unsigned int)conflict.original.sensor_id,
+               (unsigned long)conflict.original.boot_id,
+               (unsigned long)conflict.original.event_id,
+               (unsigned int)conflict.original.motion,
+               (unsigned int)conflict.original.button,
+               (unsigned int)conflict.original.version,
+               (unsigned int)conflict.incoming.motion,
+               (unsigned int)conflict.incoming.button,
+               (unsigned int)conflict.incoming.version);
+    }
+
+    printf("Local conflict storage: %u record(s)\n", count);
+    return ESP_OK;
+}
+
 esp_err_t event_store_init(void)
 {
     esp_err_t err = nvs_flash_init_partition("events");
@@ -99,41 +141,11 @@ esp_err_t event_store_init(void)
         }
     }
 
-    unsigned int local_count = 0;
-
-    for (unsigned int slot = 0; slot < LOCAL_CONFLICT_CAPACITY; slot++) {
-        char key[16];
-        local_conflict_t conflict;
-        size_t length = sizeof(conflict);
-
-        local_conflict_slot_key(slot, key, sizeof(key));
-        err = nvs_get_blob(event_store_handle, key, &conflict, &length);
-
-        if (err == ESP_ERR_NVS_NOT_FOUND) {
-            continue;
-        }
-
-        if (err != ESP_OK || length != sizeof(conflict)) {
-            nvs_close(event_store_handle);
-            return err != ESP_OK ? err : ESP_ERR_INVALID_SIZE;
-        }
-
-        local_count++;
-        printf("Local conflict: slot=%u, sensor=%u, boot=%lu, event=%lu, "
-            "original=%u/%u/v%u, incoming=%u/%u/v%u\n",
-            slot,
-            (unsigned int)conflict.original.sensor_id,
-            (unsigned long)conflict.original.boot_id,
-            (unsigned long)conflict.original.event_id,
-            (unsigned int)conflict.original.motion,
-            (unsigned int)conflict.original.button,
-            (unsigned int)conflict.original.version,
-            (unsigned int)conflict.incoming.motion,
-            (unsigned int)conflict.incoming.button,
-            (unsigned int)conflict.incoming.version);
+    err = event_store_list_local_conflicts();
+    if (err != ESP_OK) {
+        nvs_close(event_store_handle);
+        return err;
     }
-
-    printf("Local conflict storage: %u record(s)\n", local_count);
 
     printf("Event storage: %u saved event(s)\n", count);
     return ESP_OK;

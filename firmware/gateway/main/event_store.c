@@ -669,6 +669,56 @@ esp_err_t event_store_mark_conflict(const sensor_event_t *event)
     return ESP_ERR_NVS_NOT_FOUND;
 }
 
+esp_err_t event_store_list_quarantined(void)
+{
+    unsigned int count = 0;
+
+    for (unsigned int slot = 0; slot < EVENT_STORE_CAPACITY; slot++) {
+        char key[16];
+        stored_event_t stored;
+        size_t length = sizeof(stored);
+
+        event_slot_key(slot, key, sizeof(key));
+
+        esp_err_t err = nvs_get_blob(
+            event_store_handle, key, &stored, &length);
+
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            continue;
+        }
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (length != sizeof(stored)) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        bool is_conflict = false;
+        err = event_slot_is_conflict(slot, &stored, &is_conflict);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (!is_conflict) {
+            continue;
+        }
+
+        count++;
+        printf("Quarantined: slot=%u, sensor=%u, boot=%lu, event=%lu, "
+               "motion=%u, button=%u, version=%u, rssi=%d\n",
+               slot,
+               (unsigned int)stored.event.sensor_id,
+               (unsigned long)stored.event.boot_id,
+               (unsigned long)stored.event.event_id,
+               (unsigned int)stored.event.motion,
+               (unsigned int)stored.event.button,
+               (unsigned int)stored.event.version,
+               stored.event.rssi);
+    }
+
+    printf("Quarantined events: %u record(s)\n", count);
+    return ESP_OK;
+}
+
 esp_err_t event_store_peek_conflict(sensor_event_t *event, bool *found)
 {
     if (event == NULL || found == NULL) {

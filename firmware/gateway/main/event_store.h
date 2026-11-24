@@ -29,3 +29,4 @@ esp_err_t event_store_remove_local_conflict(
     unsigned int slot,
     const sensor_event_t *original,
     const sensor_event_t *incoming);
+esp_err_t event_store_list_quarantined(void);

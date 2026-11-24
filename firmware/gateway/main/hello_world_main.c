@@ -58,6 +58,17 @@ static void console_task(void *arg)
                         printf("Local conflict list failed: %s\n",
                                esp_err_to_name(err));
                     }
+                } else if (strcmp(line, "quarantined") == 0) {
+                    removal_pending = false;
+
+                    xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+                    esp_err_t err = event_store_list_quarantined();
+                    xSemaphoreGive(event_store_mutex);
+
+                    if (err != ESP_OK) {
+                        printf("Quarantined list failed: %s\n",
+                               esp_err_to_name(err));
+                    }
                 } else if (strcmp(line, "confirm-remove") == 0) {
                     if (!removal_pending) {
                         printf("No removal pending. Use inspect <slot> first.\n");

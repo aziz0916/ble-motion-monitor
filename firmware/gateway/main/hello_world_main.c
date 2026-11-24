@@ -383,6 +383,8 @@ static void console_check_quarantined(unsigned int slot)
         printf("Backend result: unable to verify\n");
         break;
     }
+    printf("Console minimum free stack: %lu bytes\n",
+           (unsigned long)uxTaskGetStackHighWaterMark(NULL));
 }
 
 static void conflict_check_task(void *arg)

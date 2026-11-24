@@ -20,6 +20,8 @@
 static QueueHandle_t event_queue;
 static SemaphoreHandle_t event_store_mutex;
 
+static void console_check_quarantined(unsigned int slot);
+
 static void console_task(void *arg)
 {
     char line[64];
@@ -68,6 +70,17 @@ static void console_task(void *arg)
                     if (err != ESP_OK) {
                         printf("Quarantined list failed: %s\n",
                                esp_err_to_name(err));
+                    }
+                } else if (strncmp(line, "check-quarantined ", 18) == 0) {
+                    unsigned int slot;
+                    char extra;
+
+                    removal_pending = false;
+
+                    if (sscanf(line + 18, "%3u %c", &slot, &extra) != 1) {
+                        printf("Usage: check-quarantined <slot>\n");
+                    } else {
+                        console_check_quarantined(slot);
                     }
                 } else if (strcmp(line, "confirm-remove") == 0) {
                     if (!removal_pending) {
@@ -328,6 +341,48 @@ static event_check_result_t event_already_recorded(
     }
 
     return event_response_matches(response.data, event);
+}
+
+static void console_check_quarantined(unsigned int slot)
+{
+    sensor_event_t event;
+
+    xSemaphoreTake(event_store_mutex, portMAX_DELAY);
+    esp_err_t err = event_store_get_quarantined(slot, &event);
+    xSemaphoreGive(event_store_mutex);
+
+    if (err != ESP_OK) {
+        printf("Quarantined read failed: %s\n", esp_err_to_name(err));
+        return;
+    }
+
+    printf("Checking slot=%u, sensor=%u, boot=%lu, event=%lu\n",
+           slot,
+           (unsigned int)event.sensor_id,
+           (unsigned long)event.boot_id,
+           (unsigned long)event.event_id);
+
+    char authorization[sizeof(CONFIG_GATEWAY_API_KEY) + sizeof("Bearer ")];
+    snprintf(authorization, sizeof(authorization),
+             "Bearer %s", CONFIG_GATEWAY_API_KEY);
+
+    event_check_result_t result = event_already_recorded(&event, authorization);
+
+    switch (result) {
+    case EVENT_CHECK_MATCH:
+        printf("Backend result: matching record found\n");
+        break;
+    case EVENT_CHECK_CONFLICT:
+        printf("Backend result: record content conflicts\n");
+        break;
+    case EVENT_CHECK_NOT_FOUND:
+        printf("Backend result: record not found\n");
+        break;
+    case EVENT_CHECK_ERROR:
+    default:
+        printf("Backend result: unable to verify\n");
+        break;
+    }
 }
 
 static void conflict_check_task(void *arg)

@@ -213,12 +213,39 @@ static void test_remove_local_conflict(void)
     puts("PASS: remove local conflict");
 }
 
+static void test_get_quarantined(void)
+{
+    mock_nvs_reset();
+    assert(event_store_init() == ESP_OK);
+
+    sensor_event_t quarantined = make_event(1, 1);
+    sensor_event_t normal = make_event(2, 0);
+    sensor_event_t result;
+
+    assert(event_store_add(&quarantined) == ESP_OK);
+    assert(event_store_add(&normal) == ESP_OK);
+    assert(event_store_mark_conflict(&quarantined) == ESP_OK);
+
+    assert(event_store_get_quarantined(0, &result) == ESP_OK);
+    assert(result.event_id == 1 && result.motion == 1);
+    assert(event_store_get_quarantined(1, &result) ==
+           ESP_ERR_INVALID_STATE);
+    assert(event_store_get_quarantined(2, &result) ==
+           ESP_ERR_NVS_NOT_FOUND);
+    assert(event_store_get_quarantined(EVENT_STORE_CAPACITY, &result) ==
+           ESP_ERR_INVALID_ARG);
+    assert(event_store_get_quarantined(0, NULL) == ESP_ERR_INVALID_ARG);
+
+    puts("PASS: get quarantined");
+}
+
 int main(void)
 {
     test_conflict_and_replay();
     test_local_conflict_full();
     test_get_local_conflict();
     test_remove_local_conflict();
+    test_get_quarantined();
 
     puts("All host tests passed");
     return 0;

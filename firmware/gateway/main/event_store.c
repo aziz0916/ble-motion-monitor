@@ -669,6 +669,43 @@ esp_err_t event_store_mark_conflict(const sensor_event_t *event)
     return ESP_ERR_NVS_NOT_FOUND;
 }
 
+esp_err_t event_store_get_quarantined(
+    unsigned int slot, sensor_event_t *event)
+{
+    if (slot >= EVENT_STORE_CAPACITY || event == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char key[16];
+    stored_event_t stored;
+    size_t length = sizeof(stored);
+
+    event_slot_key(slot, key, sizeof(key));
+
+    esp_err_t err = nvs_get_blob(
+        event_store_handle, key, &stored, &length);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (length != sizeof(stored)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    bool is_conflict = false;
+    err = event_slot_is_conflict(slot, &stored, &is_conflict);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (!is_conflict) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    *event = stored.event;
+    return ESP_OK;
+}
+
 esp_err_t event_store_list_quarantined(void)
 {
     unsigned int count = 0;

@@ -761,7 +761,7 @@ void app_main(void)
         abort();
     }
 
-    if (xTaskCreate(console_task, "console", 4096, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(console_task, "console", 8192, NULL, 5, NULL) != pdPASS) {
         printf("Failed to create console task\n");
         abort();
     }

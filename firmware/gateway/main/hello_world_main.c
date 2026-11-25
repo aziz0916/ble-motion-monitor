@@ -681,8 +681,6 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
         if (name != NULL &&
             name_length == strlen(target) &&
             memcmp(name, target, name_length) == 0) {
-            printf("Found BLE_Motion, RSSI=%d dBm\n",
-                   param->scan_rst.rssi);
             uint8_t data_length = 0;
             uint8_t *data = esp_ble_resolve_adv_data(
                 param->scan_rst.ble_adv,
@@ -690,55 +688,60 @@ static void gap_callback(esp_gap_ble_cb_event_t event,
                 &data_length
             );
 
-            if (data != NULL) {
-                printf("Manufacturer data:");
-                for (uint8_t i = 0; i < data_length; i++) {
-                    printf(" %02X", data[i]);
-                }
-                printf("\n");
-                if (data_length == 14 && data[0] == 0xFF &&
-                    data[1] == 0xFF && data[2] == 0x03) {
-                    uint32_t event_id = (uint32_t)data[4] |
-                                        ((uint32_t)data[5] << 8) |
-                                        ((uint32_t)data[12] << 16) |
-                                        ((uint32_t)data[13] << 24);
-                    uint32_t boot_id = (uint32_t)data[8] |
-                                       ((uint32_t)data[9] << 8) |
-                                       ((uint32_t)data[10] << 16) |
-                                       ((uint32_t)data[11] << 24);
+            if (data != NULL &&
+                data_length == 14 &&
+                data[0] == 0xFF &&
+                data[1] == 0xFF &&
+                data[2] == 0x03) {
+                uint32_t event_id = (uint32_t)data[4] |
+                                    ((uint32_t)data[5] << 8) |
+                                    ((uint32_t)data[12] << 16) |
+                                    ((uint32_t)data[13] << 24);
+                uint32_t boot_id = (uint32_t)data[8] |
+                                   ((uint32_t)data[9] << 8) |
+                                   ((uint32_t)data[10] << 16) |
+                                   ((uint32_t)data[11] << 24);
 
-                    printf("boot_id=%lu\n", (unsigned long)boot_id);
-                    static bool seen[256] = {0};
-                    static unsigned int last_event[256] = {0};
-                    static uint32_t last_boot[256] = {0};
-                    uint8_t sensor_id = data[3];
+                static bool seen[256] = {0};
+                static unsigned int last_event[256] = {0};
+                static uint32_t last_boot[256] = {0};
+                uint8_t sensor_id = data[3];
 
-                    if (seen[sensor_id] &&
-                        last_boot[sensor_id] == boot_id &&
-                        last_event[sensor_id] == event_id) {
-                        printf("duplicate event\n");
+                if (!(seen[sensor_id] &&
+                      last_boot[sensor_id] == boot_id &&
+                      last_event[sensor_id] == event_id)) {
+                    sensor_event_t sensor_event = {
+                        .sensor_id = sensor_id,
+                        .boot_id = boot_id,
+                        .event_id = event_id,
+                        .motion = data[6],
+                        .button = data[7],
+                        .rssi = param->scan_rst.rssi,
+                        .version = data[2],
+                    };
+
+                    if (xQueueSend(event_queue, &sensor_event, 0) == pdPASS) {
+                        seen[sensor_id] = true;
+                        last_event[sensor_id] = event_id;
+                        last_boot[sensor_id] = boot_id;
+
+                        printf("New event queued: sensor=%u, boot=%lu, "
+                               "event=%lu, motion=%u, button=%u, "
+                               "version=%u, rssi=%d\n",
+                               (unsigned int)sensor_id,
+                               (unsigned long)boot_id,
+                               (unsigned long)event_id,
+                               (unsigned int)data[6],
+                               (unsigned int)data[7],
+                               (unsigned int)data[2],
+                               param->scan_rst.rssi);
                     } else {
-                        sensor_event_t event = {
-                            .sensor_id = sensor_id,
-                            .boot_id = boot_id,
-                            .event_id = event_id,
-                            .motion = data[6],
-                            .button = data[7],
-                            .rssi = param->scan_rst.rssi,
-                            .version = data[2],
-                        };
-
-                        if (xQueueSend(event_queue, &event, 0) == pdPASS) {
-                            seen[sensor_id] = true;
-                            last_event[sensor_id] = event_id;
-                            last_boot[sensor_id] = boot_id;
-                            printf("new event queued\n");
-                        } else {
-                            printf("event queue full\n");
-                        }
+                        printf("Event queue full: sensor=%u, boot=%lu, "
+                               "event=%lu\n",
+                               (unsigned int)sensor_id,
+                               (unsigned long)boot_id,
+                               (unsigned long)event_id);
                     }
-                    printf("version=%u, sensor=%u, event=%lu, motion=%u, button=%u\n",
-                           data[2], data[3], (unsigned long)event_id, data[6], data[7]);
                 }
             }
         }

@@ -29,6 +29,18 @@ services:
     volumes:
       - motion_postgres_data:/var/lib/postgresql/data
 
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.20.7
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Taipei
+      GENERIC_TIMEZONE: Asia/Taipei
+    ports:
+      - "127.0.0.1:5684:5678"
+    volumes:
+      - motion_n8n_data:/home/node/.n8n
+
 volumes:
   motion_nocobase_storage:
   motion_postgres_data:
+  motion_n8n_data:

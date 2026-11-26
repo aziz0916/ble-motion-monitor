@@ -1,0 +1,128 @@
+{
+  "name": "BLE Motion Monitor - 按鈕事件通知",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sensor-button-event",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "241ca590-317a-4474-94f0-b222fbe47b30",
+      "name": "Webhook",
+      "webhookId": "5d04559b-7559-45ba-80db-90337354afd2",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SEGhUWC6IIBhBznA",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dc91aade-9130-4dce-96fd-218c4a88fcdd",
+              "leftValue": "={{ $json.body.button }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        208,
+        0
+      ],
+      "id": "4d3e483a-bea5-44fa-82f0-13fd51394427",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/push",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    to: \"YOUR_LINE_USER_ID\",\n    messages: [\n      {\n        type: \"text\",\n        text:\n          \"【感測器按鈕事件】\\n\" +\n          \"感測器編號：\" + $json.body.sensor_id + \"\\n\" +\n          \"啟動編號：\" + $json.body.boot_id + \"\\n\" +\n          \"事件編號：\" + $json.body.event_id + \"\\n\" +\n          \"狀態：按鈕已按下\"\n      }\n    ]\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        416,
+        -96
+      ],
+      "id": "6f3a6543-d16a-448e-b15d-c0a71bd0483b",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SEGhUWC6IIBhBznA",
+          "name": "Header Auth account"
+        },
+        "httpBearerAuth": {
+          "id": "1tF6tf1KHz7vcTkD",
+          "name": "Bearer Auth account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5199da38-be80-4d34-aedc-3d50135b526f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dfac9d3d85a805e2ad819772e8bd33930f0b783525e8ac2dc8c10056e405f48e"
+  },
+  "id": "jxG9SCxUwhmaU13F",
+  "tags": []
+}

@@ -11,3 +11,6 @@ sdkconfig.old
 
 # 其他產物
 node_modules/
+# Python cache
+__pycache__/
+*.pyc

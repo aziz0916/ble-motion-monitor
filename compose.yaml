@@ -40,6 +40,17 @@ services:
     volumes:
       - motion_n8n_data:/home/node/.n8n
 
+  monitor:
+    build: ./monitor
+    restart: unless-stopped
+    depends_on:
+      - nocobase
+    environment:
+      NOCOBASE_URL: http://nocobase:80
+      NOCOBASE_API_KEY: ${MONITOR_NOCOBASE_API_KEY:?請先設定監控服務 API Key}
+    ports:
+      - "127.0.0.1:13004:8080"
+
 volumes:
   motion_nocobase_storage:
   motion_postgres_data:
